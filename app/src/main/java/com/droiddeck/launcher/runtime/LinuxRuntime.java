@@ -104,14 +104,8 @@ public final class LinuxRuntime {
         File icdDir = new File(rootDir(context), "usr/share/vulkan/icd.d");
         File[] manifests = icdDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (manifests == null) return null;
-        
-        com.droiddeck.launcher.gpu.GpuInfo gpu = com.droiddeck.launcher.gpu.GpuInfo.Companion.read(context);
-        boolean isMali = gpu.getFamily() == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI;
-        
         for (File manifest : manifests) {
-            if (isMali && manifest.getName().contains("panfrost")) return manifest;
-            if (isMali && manifest.getName().contains("lvp")) return manifest; // Fallback to llvmpipe for Mali
-            if (!isMali && manifest.getName().contains("freedreno")) return manifest;
+            if (manifest.getName().contains("freedreno")) return manifest;
         }
         return manifests.length > 0 ? manifests[0] : null;
     }

@@ -1,4 +1,3 @@
-import com.droiddeck.launcher.gpu.GpuInfo
 package com.droiddeck.launcher.session
 
 import com.droiddeck.launcher.gpu.LinuxVulkanDriver
@@ -391,15 +390,192 @@ class SessionService : Service() {
         // or a binary inside the runtime). This is how an emulator gets the GPU - the desktop's
         // labwc composites in software and offers no dma-buf, so a Vulkan swapchain cannot exist
         // there (RPCS3 died with VK_ERROR_SURFACE_LOST); gamescope's Xwayland is the path the
-        val isMali = GpuInfo.read(this).family == GpuInfo.Family.MALI
-        if (!isMali) {
-            // Steam's CEF needs GL and the rootfs ships no native GL driver: route it through Zink.
-            guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
-            guest.add("GALLIUM_DRIVER=zink")
-            guest.add("LIBGL_KOPPER_DRI2=true")
+        // Steam games already render through.
+        if (SessionState.mode == MODE_RUN) {
+            val program = SessionState.program
+            if (program.isNullOrEmpty()) {
+                Log.e(TAG, "run mode without a program")
+                stopSession(65)
+                return
+            }
+            guest.add(program)
+            guest.addAll(SessionState.programArgs)
+            Log.i(TAG, "run: $program ${SessionState.programArgs.joinToString(" ")} under gamescope")
         }
-        LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
 
+        // Android has no /dev/shm; the cache stands in for it and, unlike the real thing, keeps
+        // whatever a session leaves behind. The client abandons tens of megabytes of streams a run.
+        FileUtils.clear(File(cacheDir, "shm"))
+
+        val binds = sessionBinds(controllersOn, fakeInputDir, sessionDir, guest)
+        // The fast path is told exactly the rootfs and binds proot is given (ProotFastPath).
+        val fastPathKey = if (ProotFastPath.enabled(this)) {
+            val prootBinds = LinuxRuntime.binds(
+                this, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds,
+            )
+            val root = LinuxRuntime.rootDir(this)
+            ProotFastPath.key(root, prootBinds)?.also { key ->
+                val env = ProotFastPath.guestEnv(root, prootBinds, key)
+                guest.addAll(fastPathAt, env)
+                shellGuest.addAll(fastPathAt, env)
+                Log.i(TAG, "proot: fast path on (${prootBinds.size} binds)")
+            } ?: run {
+                Log.w(TAG, "proot: fast path off - ${prootBinds.size} binds (it holds ${ProotFastPath.MAX_BINDS}) or a path it cannot be told")
+                null
+            }
+        } else null
+
+        val command = LinuxRuntime.command(
+            this, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, guest,
+        )
+
+        val hostEnv = HostEnvironment()
+        hostEnv["PROOT_LOADER"] = LinuxRuntime.prootLoader(this).path
+        hostEnv["PROOT_TMP_DIR"] = cacheDir.path
+        // proot links against a libtalloc beside it, and Android's linker does not search an
+        // executable's own directory: unnamed, the process dies before it starts and says so only
+        // in `logcat -b crash`.
+        // proot reads this itself, so it belongs in proot's own environment rather than the guest's.
+        if (SessionPrefs.prootNoSeccomp(this)) {
+            hostEnv["PROOT_NO_SECCOMP"] = "1"
+            Log.i(TAG, "proot: seccomp acceleration off by request")
+        }
+        fastPathKey?.let { ProotFastPath.hostEnv(it).let { (k, v) -> hostEnv[k] = v } }
+        val prootLibs = LinuxRuntime.prootLibraryPath(this)
+        if (prootLibs.isNotEmpty()) hostEnv["LD_LIBRARY_PATH"] = prootLibs
+
+        val terminalCommand = LinuxRuntime.command(
+            this, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, shellGuest,
+        )
+        val terminalHostEnvironment = LinkedHashMap(System.getenv())
+        hostEnv.asArray().forEach { entry ->
+            val separator = entry.indexOf('=')
+            if (separator > 0) terminalHostEnvironment[entry.substring(0, separator)] = entry.substring(separator + 1)
+        }
+        if (gen == sessionGen && SessionState.running) {
+            SessionTerminal.prepare(terminalCommand, terminalHostEnvironment.map { (key, value) -> "$key=$value" }.toTypedArray(), root, gen)
+        }
+
+        // Whether the client signs in to Valve or starts offline: read once, while it starts, and
+        // rewritten by the client when it exits, so it is set again here at every session start.
+        if (SessionState.mode == MODE_STEAM || SessionState.mode == MODE_DESKTOP) OfflineMode.apply(this, root)
+
+        val networkLink = LinuxNetworkLinkComponent(this, root)
+        networkLink.attach(this)
+        networkLink.publish()
+        components.add(networkLink)
+        if (gen != sessionGen || !SessionState.running) {
+            Log.i(TAG, "session stopped while it was starting; not launching it")
+            if (gen == sessionGen) components.clear()
+            return
+        }
+        components.forEach { it.start() }
+
+        val line = command.joinToString(" ") {
+            it.replace("\\", "\\\\").replace(" ", "\\ ")
+        }
+        watchLaunchRequests(sessionRoot)
+        watchSyncWanted(root)
+        EsyncPacks.fetchInBackground(this, root)
+        // One session replacing another (the desktop's Steam launchers): the old proot is killed
+        // by the teardown a second after the new one has started, and its exit used to arrive
+        // here as "session ended: 137" and end the NEW session. An exit belongs to the session
+        // that started it.
+        val pid = HostProcess.start(line, hostEnv.asArray(), root, { status ->
+            if (gen != sessionGen) {
+                Log.i(TAG, "an earlier session's process ended ($status); the current one carries on")
+                return@start
+            }
+            Log.i(TAG, "session ended: $status")
+            stopSession(status ?: -1)
+        }, null)
+        Log.i(TAG, "session pid $pid, log ${sessionLog.path}")
+        if (gen != sessionGen || !SessionState.running) {
+            Log.i(TAG, "session stopped while its guest was starting; taking it down")
+            if (gen == sessionGen) {
+                launchWatcher?.stopWatching()
+                launchWatcher = null
+                syncWatcher?.stopWatching()
+                syncWatcher = null
+                components.reversed().forEach { runCatching { it.stop() } }
+                components.clear()
+            }
+            if (pid > 1) Thread({ teardown(pid) }, "session-teardown").start()
+            return
+        }
+        sessionPid = pid
+        if (pid > 1) {
+            raiseTracer(pid, gen)
+            SessionEvents.guestStarted(pid)
+        } else {
+            SessionEvents.record("guest.start_failed", mapOf("pid" to pid))
+            SessionEvents.fail("GUEST_START_FAILED", "The guest process could not be started", pid)
+            stopSession(-1)
+            return
+        }
+        if (gen == sessionGen && SessionState.running) {
+            suspendController = SessionSuspendController(
+                sessionRoot = { sessionPid },
+                helperRoots = { components.mapNotNull { it.suspendPid().takeIf { pid -> pid > 1 } } },
+                suspendAudio = {
+                    if (!pulse.setSinkSuspended(true)) Log.w(TAG, "could not suspend audio sink")
+                },
+                resumeAudio = {
+                    if (!pulse.setSinkSuspended(false)) Log.w(TAG, "could not resume audio sink")
+                },
+            )
+            mainHandler.post { updateSuspendPolicy() }
+        }
+    }
+
+    /** The session's own log folder, opened and filled with what is known before anything starts. */
+    private fun openSessionFolder(): File {
+        // One folder per session, claimed by whoever started first - the activity starts the
+        // compositor before this service runs - so the compositor's log lands in the same place.
+        val sessionDir = SessionPaths.beginOrCurrent(this)
+        val sessionLog = File(sessionDir, "session.log")
+        SessionState.logFile = sessionLog
+        SessionState.logDirectory = sessionDir
+        SessionState.sessionId = sessionDir.name
+        SessionState.eventsFile = File(sessionDir, "events.jsonl")
+        SessionEvents.record("session.logs_ready", mapOf("logDir" to sessionDir.path))
+        // Written first, so a session that dies in its first second still says what it ran on.
+        DeviceReport.write(this, File(sessionDir, "device.txt"), SessionState.mode)
+        NetworkReport.write(this, File(sessionDir, "network.txt"))
+        // Everything the app decides from here on - the driver it chose, the audio line, a rival
+        // client stopped, the exit status - reaches logcat and nowhere a user can get at. Mirror it.
+        SessionLogCapture.start(File(sessionDir, "app.log"))
+        return sessionDir
+    }
+
+    /** The guest's base environment: paths, the display, the GL/Vulkan stack and the client's switches. */
+    private fun addClientEnvironment(guest: MutableList<String>, steamHere: Boolean) {
+        guest.add("/usr/bin/env")
+        guest.add("-i")
+        guest.add("HOME=/root")
+        guest.add("USER=root")
+        guest.add("PATH=/usr/local/bin:/usr/bin:/bin")
+        guest.add("TERM=xterm-256color")
+        guest.add("LANG=C.UTF-8")
+        // Steam's interface language: the app's (Setup's choice, or the system's). The system's
+        // region decides between Spain's and Latin American Spanish, which the app has one of.
+        guest.add("BL_STEAM_LANGUAGE=" + SteamLanguage.forLocale(
+            com.droiddeck.launcher.core.AppLanguage.effective(this),
+            com.droiddeck.launcher.core.AppLanguage.system(this).country,
+        ))
+        // Without this the session is UTC: the client's clock, its logs and every timestamp in a
+        // session bundle sit hours off the device's. Bannerlator carries the same line.
+        guest.add("TZ=" + java.util.TimeZone.getDefault().id)
+        guest.add("XDG_RUNTIME_DIR=" + LinuxRuntime.GUEST_RUNTIME_DIR)
+        guest.add("XDG_SESSION_TYPE=wayland")
+        guest.add("WAYLAND_DISPLAY=wayland-0")
+        guest.add("BL_ANDROID_CLIPBOARD=" + File(filesDir, "session/android-clipboard").path)
+        guest.add("GAMESCOPE_FORCE_GENERAL_QUEUE=1")
+        // Steam's CEF needs GL and the rootfs ships no native GL driver: route it through Zink.
+        guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
+        guest.add("GALLIUM_DRIVER=zink")
+        guest.add("LIBGL_KOPPER_DRI2=true")
+        LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
         // An imported glibc Turnip, when one is set (by the user, or by Auto): the session script
         // checks the manifest and its library from inside and points the loader at it with
         // VK_DRIVER_FILES, so the runtime's own driver above stays untouched and is what a bad
