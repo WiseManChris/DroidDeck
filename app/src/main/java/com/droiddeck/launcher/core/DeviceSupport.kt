@@ -18,6 +18,13 @@ object DeviceSupport {
     fun adreno(): Boolean =
         File("/sys/class/kgsl/kgsl-3d0").exists() || File("/vendor/lib64/hw/vulkan.adreno.so").exists()
 
+    fun mali(): Boolean =
+        File("/dev/mali0").exists() || File("/sys/module/mali_kbase").exists() || 
+        File("/vendor/lib64/hw/vulkan.mali.so").exists() || 
+        File("/sys/module/panfrost").exists() || File("/sys/module/panthor").exists()
+
+    fun supported(): Boolean = adreno() || mali()
+
     /** The chip as the device names it, for the card that explains the refusal. */
     fun gpuName(context: Context): String {
         val soc = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL.takeIf { it.isNotBlank() && it != Build.UNKNOWN } else null

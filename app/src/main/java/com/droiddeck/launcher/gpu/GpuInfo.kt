@@ -35,7 +35,8 @@ data class GpuInfo(
         A6XX("Adreno 6xx"),
         /** An Adreno whose model KGSL does not give: treated as the newest family it could be. */
         ADRENO_UNKNOWN("Adreno"),
-        NOT_ADRENO("Not an Adreno GPU");
+        NOT_ADRENO("Not an Adreno GPU"),
+        MALI("Mali");
 
         /** [label] in the app's language: the Adreno families are names, the rest is words. */
         fun label(context: Context): String = if (this == NOT_ADRENO) context.getString(R.string.gpuinfo_not_adreno) else label
@@ -58,7 +59,7 @@ data class GpuInfo(
             Support.TESTED -> "Supported"
             Support.UNTESTED -> if (family == Family.A7XX_LOW) "Experimental: its drivers are test builds"
                 else "Outside tested hardware (Adreno 650, 725 and newer): it may not run"
-            Support.UNSUPPORTED -> "Not supported: DroidDeck needs an Adreno (Snapdragon) GPU"
+            Support.UNSUPPORTED -> "Not supported: DroidDeck needs an Adreno (Snapdragon) or Mali GPU"
         }
 
     /** [supportText] in the app's language. */
@@ -76,7 +77,8 @@ data class GpuInfo(
         private const val UNNAMED = "this GPU"
 
         fun detect(): GpuInfo {
-            val adreno = File("/sys/class/kgsl/kgsl-3d0").exists() || File("/vendor/lib64/hw/vulkan.adreno.so").exists()
+            val adreno = com.droiddeck.launcher.core.DeviceSupport.adreno()
+            val mali = com.droiddeck.launcher.core.DeviceSupport.mali()
             val raw = listOf("/sys/class/kgsl/kgsl-3d0/gpu_model", "/sys/class/kgsl/kgsl-3d0/gpu_chipid")
                 .firstNotNullOfOrNull { FileUtils.readString(File(it))?.trim()?.takeIf(String::isNotEmpty) }
             // Where vendors put the chip's model, named when it is known: "Snapdragon 8 Gen 2 (QCS8550)".
@@ -94,10 +96,10 @@ data class GpuInfo(
                 fromPlatform > 0 -> "platform"
                 else -> ""
             }
-            val family = familyOf(adreno, model)
+            val family = familyOf(adreno, mali, model)
             val samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true)
             return GpuInfo(
-                name = if (!adreno) Build.HARDWARE.ifBlank { UNNAMED } else if (model > 0) "Adreno $model" else "Adreno",
+                name = if (mali) "Mali" else if (!adreno) Build.HARDWARE.ifBlank { UNNAMED } else if (model > 0) "Adreno $model" else "Adreno",
                 model = model, family = family, soc = soc,
                 oneUi8Gen2 = samsung && model == 740,
                 kgslName = raw.orEmpty(), modelSource = source,
@@ -122,7 +124,8 @@ data class GpuInfo(
             ""
         }
 
-        internal fun familyOf(adreno: Boolean, model: Int): Family = when {
+        internal fun familyOf(adreno: Boolean, mali: Boolean, model: Int): Family = when {
+            mali -> Family.MALI
             !adreno -> Family.NOT_ADRENO
             model == 0 -> Family.ADRENO_UNKNOWN
             model >= 800 -> Family.A8XX
