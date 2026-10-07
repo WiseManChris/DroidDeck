@@ -9,7 +9,7 @@ import org.junit.Test
 
 class DriverPairsTest {
     private fun gpu(model: Int, adreno: Boolean = true, oneUi: Boolean = false) =
-        GpuInfo("Adreno $model", model, GpuInfo.familyOf(adreno, model), "", oneUi)
+        GpuInfo("Adreno $model", model, GpuInfo.familyOf(adreno, false, model), "", oneUi)
 
     private fun asset(name: String, tag: String, linux: Boolean, pair: String) =
         TurnipReleases.Asset("src", tag, name, "https://example/$name", 3_000_000, linux, "label", "0".repeat(64), pair)
