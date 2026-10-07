@@ -5,6 +5,12 @@
   </picture>
 </p>
 
+## 🍴 WiseManChris's Fork
+
+This is a custom fork of DroidDeck specifically modified to add experimental support for Mali GPUs, such as the Orange Pi 5 Plus! The original DroidDeck project is hardcoded to only allow Adreno (Snapdragon) GPUs. This fork removes those restrictions and uses the system Vulkan loader on Mali devices.
+
+---
+
 DroidDeck brings the SteamOS experience to Android: Valve's Steam client in Big Picture on your handheld (now with experimental Mali support!), with Windows games through Valve's ARM64 Proton.
 
 <p align="center"><a href="https://discord.gg/JRGAvawjsm"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" alt="Join the DroidDeck Discord"></a></p>
