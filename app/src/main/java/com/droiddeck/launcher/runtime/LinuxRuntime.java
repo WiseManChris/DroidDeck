@@ -105,7 +105,7 @@ public final class LinuxRuntime {
         File[] manifests = icdDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (manifests == null) return null;
         
-        com.droiddeck.launcher.gpu.GpuInfo gpu = com.droiddeck.launcher.gpu.GpuInfo.Companion.read(context);
+        com.droiddeck.launcher.gpu.GpuInfo gpu = com.droiddeck.launcher.gpu.GpuInfo.Companion.detect();
         boolean isMali = gpu.getFamily() == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI;
         
         for (File manifest : manifests) {
