@@ -380,27 +380,40 @@ class SessionService : Service() {
             add("-c")
             add("cd \"\$HOME\" && exec /bin/bash -i")
         }
-        guest.add(LinuxRuntime.SESSION_SCRIPT)
-        guest.add(SessionState.mode)
-        if (SessionState.mode == MODE_STEAM) SessionState.steamUrl?.takeIf { it.startsWith("steam://") }?.let {
-            guest.add(it)
-            Log.i(TAG, "steam: handing the client $it")
-        }
-        // A program under gamescope: the script's run mode takes the path (an AppImage, a script
-        // or a binary inside the runtime). This is how an emulator gets the GPU - the desktop's
-        // labwc composites in software and offers no dma-buf, so a Vulkan swapchain cannot exist
-        // there (RPCS3 died with VK_ERROR_SURFACE_LOST); gamescope's Xwayland is the path the
-        // Steam games already render through.
-        if (SessionState.mode == MODE_RUN) {
-            val program = SessionState.program
-            if (program.isNullOrEmpty()) {
-                Log.e(TAG, "run mode without a program")
-                stopSession(65)
-                return
+if (com.droiddeck.launcher.gpu.GpuInfo.detect().family == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI) {
+            val originalCommand = mutableListOf(LinuxRuntime.SESSION_SCRIPT, SessionState.mode)
+            if (SessionState.mode == MODE_STEAM) {
+                SessionState.steamUrl?.takeIf { it.startsWith("steam://") }?.let { originalCommand.add(it) }
             }
-            guest.add(program)
-            guest.addAll(SessionState.programArgs)
-            Log.i(TAG, "run: $program ${SessionState.programArgs.joinToString(" ")} under gamescope")
+            if (SessionState.mode == MODE_RUN) {
+                val program = SessionState.program
+                if (!program.isNullOrEmpty()) {
+                    originalCommand.add(program)
+                    originalCommand.addAll(SessionState.programArgs)
+                }
+            }
+            val shellCommand = "pacman -Sy --noconfirm mesa-vulkan-drivers mesa-utils || true; exec " + originalCommand.joinToString(" ")
+            guest.add("/bin/bash")
+            guest.add("-c")
+            guest.add(shellCommand)
+        } else {
+            guest.add(LinuxRuntime.SESSION_SCRIPT)
+            guest.add(SessionState.mode)
+            if (SessionState.mode == MODE_STEAM) SessionState.steamUrl?.takeIf { it.startsWith("steam://") }?.let {
+                guest.add(it)
+                Log.i(TAG, "steam: handing the client $it")
+            }
+            if (SessionState.mode == MODE_RUN) {
+                val program = SessionState.program
+                if (program.isNullOrEmpty()) {
+                    Log.e(TAG, "run mode without a program")
+                    stopSession(65)
+                    return
+                }
+                guest.add(program)
+                guest.addAll(SessionState.programArgs)
+                Log.i(TAG, "run: $program ${SessionState.programArgs.joinToString(" ")} under gamescope")
+            }
         }
 
         // Android has no /dev/shm; the cache stands in for it and, unlike the real thing, keeps
