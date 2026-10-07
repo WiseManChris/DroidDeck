@@ -16,13 +16,13 @@ class DriverPairsTest {
 
     @Test
     fun familiesFollowTheAdrenoModel() {
-        assertEquals(Family.A8XX, GpuInfo.familyOf(true, 825))
-        assertEquals(Family.A8XX, GpuInfo.familyOf(true, 810))
-        assertEquals(Family.A7XX_LOW, GpuInfo.familyOf(true, 722))
-        assertEquals(Family.A7XX, GpuInfo.familyOf(true, 740))
-        assertEquals(Family.A6XX, GpuInfo.familyOf(true, 610))
-        assertEquals(Family.ADRENO_UNKNOWN, GpuInfo.familyOf(true, 0))
-        assertEquals(Family.NOT_ADRENO, GpuInfo.familyOf(false, 0))
+        assertEquals(Family.A8XX, GpuInfo.familyOf(true, false, 825))
+        assertEquals(Family.A8XX, GpuInfo.familyOf(true, false, 810))
+        assertEquals(Family.A7XX_LOW, GpuInfo.familyOf(true, false, 722))
+        assertEquals(Family.A7XX, GpuInfo.familyOf(true, false, 740))
+        assertEquals(Family.A6XX, GpuInfo.familyOf(true, false, 610))
+        assertEquals(Family.ADRENO_UNKNOWN, GpuInfo.familyOf(true, false, 0))
+        assertEquals(Family.NOT_ADRENO, GpuInfo.familyOf(false, false, 0))
     }
 
     @Test

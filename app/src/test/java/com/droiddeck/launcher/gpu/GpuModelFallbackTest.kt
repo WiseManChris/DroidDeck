@@ -10,6 +10,6 @@ class GpuModelFallbackTest {
         assertEquals(740, GpuInfo.platformModel("KALAMA"))
         assertEquals(830, GpuInfo.platformModel("sun"))
         assertEquals(0, GpuInfo.platformModel("somethingelse"))
-        assertEquals(GpuInfo.Family.A7XX, GpuInfo.familyOf(true, GpuInfo.platformModel("pineapple")))
+        assertEquals(GpuInfo.Family.A7XX, GpuInfo.familyOf(true, false, GpuInfo.platformModel("pineapple")))
     }
 }
