@@ -113,8 +113,8 @@ for (File manifest : manifests) {
             if (isMali && manifest.getName().contains("lvp")) return manifest; // Fallback to llvmpipe for Mali
             if (!isMali && manifest.getName().contains("freedreno")) return manifest;
         }
-        if (isMali) {
-            return new File(icdDir, "panfrost_icd.aarch64.json");
+if (isMali) {
+            return new File(icdDir, "lvp_icd.aarch64.json");
         }
         return manifests.length > 0 ? manifests[0] : null;
     }

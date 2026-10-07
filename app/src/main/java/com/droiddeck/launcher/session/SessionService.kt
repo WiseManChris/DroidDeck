@@ -392,7 +392,7 @@ if (com.droiddeck.launcher.gpu.GpuInfo.detect().family == com.droiddeck.launcher
                     originalCommand.addAll(SessionState.programArgs)
                 }
             }
-            val shellCommand = "pacman -Sy --noconfirm mesa-vulkan-drivers mesa-utils || true; exec " + originalCommand.joinToString(" ")
+val shellCommand = "pacman -Sy --noconfirm vulkan-swrast mesa-utils || true; exec " + originalCommand.joinToString(" ")
             guest.add("/bin/bash")
             guest.add("-c")
             guest.add(shellCommand)
@@ -585,11 +585,14 @@ if (com.droiddeck.launcher.gpu.GpuInfo.detect().family == com.droiddeck.launcher
         guest.add("BL_ANDROID_CLIPBOARD=" + File(filesDir, "session/android-clipboard").path)
         guest.add("GAMESCOPE_FORCE_GENERAL_QUEUE=1")
 val isMali = com.droiddeck.launcher.gpu.GpuInfo.detect().family == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI
-        if (!isMali) {
+if (!isMali) {
             // Steam's CEF needs GL and the rootfs ships no native GL driver: route it through Zink.
             guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
             guest.add("GALLIUM_DRIVER=zink")
             guest.add("LIBGL_KOPPER_DRI2=true")
+        } else {
+            guest.add("GALLIUM_DRIVER=llvmpipe")
+            guest.add("MESA_LOADER_DRIVER_OVERRIDE=llvmpipe")
         }
         LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
         // An imported glibc Turnip, when one is set (by the user, or by Auto): the session script
