@@ -571,10 +571,13 @@ class SessionService : Service() {
         guest.add("WAYLAND_DISPLAY=wayland-0")
         guest.add("BL_ANDROID_CLIPBOARD=" + File(filesDir, "session/android-clipboard").path)
         guest.add("GAMESCOPE_FORCE_GENERAL_QUEUE=1")
-        // Steam's CEF needs GL and the rootfs ships no native GL driver: route it through Zink.
-        guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
-        guest.add("GALLIUM_DRIVER=zink")
-        guest.add("LIBGL_KOPPER_DRI2=true")
+val isMali = com.droiddeck.launcher.gpu.GpuInfo.read(this).family == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI
+        if (!isMali) {
+            // Steam's CEF needs GL and the rootfs ships no native GL driver: route it through Zink.
+            guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
+            guest.add("GALLIUM_DRIVER=zink")
+            guest.add("LIBGL_KOPPER_DRI2=true")
+        }
         LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
         // An imported glibc Turnip, when one is set (by the user, or by Auto): the session script
         // checks the manifest and its library from inside and points the loader at it with

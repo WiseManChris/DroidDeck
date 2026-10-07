@@ -104,8 +104,14 @@ public final class LinuxRuntime {
         File icdDir = new File(rootDir(context), "usr/share/vulkan/icd.d");
         File[] manifests = icdDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (manifests == null) return null;
+        
+        com.droiddeck.launcher.gpu.GpuInfo gpu = com.droiddeck.launcher.gpu.GpuInfo.Companion.read(context);
+        boolean isMali = gpu.getFamily() == com.droiddeck.launcher.gpu.GpuInfo.Family.MALI;
+        
         for (File manifest : manifests) {
-            if (manifest.getName().contains("freedreno")) return manifest;
+            if (isMali && manifest.getName().contains("panfrost")) return manifest;
+            if (isMali && manifest.getName().contains("lvp")) return manifest; // Fallback to llvmpipe for Mali
+            if (!isMali && manifest.getName().contains("freedreno")) return manifest;
         }
         return manifests.length > 0 ? manifests[0] : null;
     }
@@ -287,12 +293,24 @@ public final class LinuxRuntime {
      * Turnip build reports the same device numbers for it.
      */
     private static void bindGpuNode(Context context, List<String> cmd) {
-        StructStat st;
+        String kgsl = "/dev/kgsl-3d0";
+        String mali = "/dev/mali0";
+        String gpuDev = null;
+        
+        StructStat st = null;
         try {
-            st = Os.stat(KGSL_DEVICE);
+            st = Os.stat(kgsl);
+            gpuDev = kgsl;
         } catch (ErrnoException e) {
-            return;
+            try {
+                st = Os.stat(mali);
+                gpuDev = mali;
+            } catch (ErrnoException e2) {
+                // No known GPU node found
+                return;
+            }
         }
+        
         long dev = st.st_rdev;
         long major = ((dev >> 8) & 0xfff) | ((dev >> 32) & ~0xfffL);
         long minor = (dev & 0xff) | ((dev >> 12) & ~0xffL);
@@ -307,9 +325,14 @@ public final class LinuxRuntime {
             }
             new File(dri, node).createNewFile();
             Files.write(new File(drm, "dev").toPath(),
-                    (major + ":" + minor + "\n").getBytes(StandardCharsets.UTF_8));
+                    (major + ":" + minor + "
+").getBytes(StandardCharsets.UTF_8));
+            
+            String driverName = gpuDev.equals(kgsl) ? "kgsl-3d0" : "mali";
             Files.write(new File(device, "uevent").toPath(),
-                    "DRIVER=kgsl-3d0\nMODALIAS=platform:kgsl-3d0\n".getBytes(StandardCharsets.UTF_8));
+                    ("DRIVER=" + driverName + "
+MODALIAS=platform:" + driverName + "
+").getBytes(StandardCharsets.UTF_8));
             File subsystem = new File(device, "subsystem");
             if (!Files.isSymbolicLink(subsystem.toPath())) {
                 Os.symlink("/sys/bus/platform", subsystem.getPath());
@@ -318,14 +341,15 @@ public final class LinuxRuntime {
             // on a mainline kernel, and the driver it reads the load of (bindAdrenoStats).
             File driver = new File(device, "driver");
             if (!Files.isSymbolicLink(driver.toPath())) {
-                Os.symlink("/sys/bus/platform/drivers/msm_drm", driver.getPath());
+                String sysDriver = gpuDev.equals(kgsl) ? "msm_drm" : "panfrost";
+                Os.symlink("/sys/bus/platform/drivers/" + sysDriver, driver.getPath());
             }
         } catch (IOException | ErrnoException e) {
             return;
         }
         bind(cmd, new File(base, "sys").getPath() + ":/sys/dev/char");
         bind(cmd, dri.getPath() + ":/dev/dri");
-        bind(cmd, KGSL_DEVICE + ":/dev/dri/" + node);
+        bind(cmd, gpuDev + ":/dev/dri/" + node);
         bindDrmClass(base, cmd, node, major + ":" + minor);
     }
 
