@@ -325,14 +325,11 @@ public final class LinuxRuntime {
             }
             new File(dri, node).createNewFile();
             Files.write(new File(drm, "dev").toPath(),
-                    (major + ":" + minor + "
-").getBytes(StandardCharsets.UTF_8));
+                    (major + ":" + minor + "\n").getBytes(StandardCharsets.UTF_8));
             
             String driverName = gpuDev.equals(kgsl) ? "kgsl-3d0" : "mali";
             Files.write(new File(device, "uevent").toPath(),
-                    ("DRIVER=" + driverName + "
-MODALIAS=platform:" + driverName + "
-").getBytes(StandardCharsets.UTF_8));
+                    ("DRIVER=" + driverName + "\nMODALIAS=platform:" + driverName + "\n").getBytes(StandardCharsets.UTF_8));
             File subsystem = new File(device, "subsystem");
             if (!Files.isSymbolicLink(subsystem.toPath())) {
                 Os.symlink("/sys/bus/platform", subsystem.getPath());
